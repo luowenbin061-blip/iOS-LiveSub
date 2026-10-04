@@ -1,5 +1,9 @@
 # dylib 云编译：macOS runner 交叉编译 iOS arm64 的 LiveSub.dylib（TrollFools 注入用）。
 #
+# 注（触发经验，2026-10-04 踩坑记录）：
+#   1) 推送请走 Contents API / 网页 / 本地 git —— 经 Git Data API 直接改 ref 不产生 workflow push 事件；
+#   2) 用 Git Data 建 tree 时必须带 base_tree（或列全文件），否则整棵树会被替换成所列条目。
+#
 # 组成：Swift 核心（Sources/LiveSubCore）+ Swift 插件层（Plugin/*.swift）+ ObjC 入口（Plugin/Entry.m）。
 # 先对 iOS 目标做整体类型检查（快、报错清楚），再编译链接；
 # 产物上传 artifact，并提交回仓库 dist/ 方便真机直接下载。
