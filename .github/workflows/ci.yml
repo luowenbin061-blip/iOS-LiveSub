@@ -5,6 +5,8 @@ name: ci
 
 on:
   push:
+    paths-ignore:
+      - 'dist/**'
   workflow_dispatch:
 
 jobs:
