@@ -18,6 +18,10 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
     private let regionSeg = UISegmentedControl(items: ["北京", "新加坡"])
     private let sizeSlider = UISlider()
     private let opacitySlider = UISlider()
+    private let vadSilenceSlider = UISlider()
+    private let vadThresholdSlider = UISlider()
+    private let vadSilenceLabel = UILabel()
+    private let vadThresholdLabel = UILabel()
     private let sourceSwitch = UISwitch()
     private let lockSwitch = UISwitch()
     private var running = false
@@ -47,7 +51,7 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
         statusLabel.font = .systemFont(ofSize: 12)
         statusLabel.textColor = UIColor.white.withAlphaComponent(0.75)
         statusLabel.numberOfLines = 0
-        statusLabel.text = "未启动（v0.4）"
+        statusLabel.text = "未启动（v0.5）"
 
         startButton.setTitle("开始翻译", for: .normal)
         startButton.titleLabel?.font = .boldSystemFont(ofSize: 15)
@@ -86,6 +90,13 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
         opacitySlider.maximumValue = 1
         opacitySlider.addTarget(self, action: #selector(opacityChanged), for: .valueChanged)
 
+        vadSilenceSlider.minimumValue = 300
+        vadSilenceSlider.maximumValue = 1500
+        vadSilenceSlider.addTarget(self, action: #selector(vadSilenceChanged), for: .valueChanged)
+        vadThresholdSlider.minimumValue = 0.1
+        vadThresholdSlider.maximumValue = 0.9
+        vadThresholdSlider.addTarget(self, action: #selector(vadThresholdChanged), for: .valueChanged)
+
         sourceSwitch.addTarget(self, action: #selector(sourceChanged), for: .valueChanged)
         lockSwitch.addTarget(self, action: #selector(lockChanged), for: .valueChanged)
 
@@ -99,6 +110,8 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
             labeled("地域", regionSeg),
             labeled("字幕字号", sizeSlider),
             labeled("背景透明度", opacitySlider),
+            labeled2("停顿判定", vadSilenceLabel, vadSilenceSlider),
+            labeled2("语音灵敏度", vadThresholdLabel, vadThresholdSlider),
             switchRow("显示原文（双语）", sourceSwitch),
             switchRow("锁定字幕（点击穿透）", lockSwitch),
             closeButton,
@@ -127,6 +140,22 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
         return row
     }
 
+    /// 右侧带实时数值的滑杆行。
+    private func labeled2(_ name: String, _ valueLabel: UILabel, _ control: UIView) -> UIView {
+        valueLabel.font = .systemFont(ofSize: 12)
+        valueLabel.textColor = UIColor.white.withAlphaComponent(0.9)
+        valueLabel.setContentHuggingPriority(.required, for: .horizontal)
+        let nameLabel = UILabel()
+        nameLabel.text = name
+        nameLabel.font = .systemFont(ofSize: 12)
+        nameLabel.textColor = UIColor.white.withAlphaComponent(0.65)
+        nameLabel.setContentHuggingPriority(.required, for: .horizontal)
+        let row = UIStackView(arrangedSubviews: [nameLabel, control, valueLabel])
+        row.axis = .horizontal
+        row.spacing = 8
+        return row
+    }
+
     private func switchRow(_ text: String, _ sw: UISwitch) -> UIView {
         let l = UILabel()
         l.text = text
@@ -147,6 +176,15 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
         opacitySlider.value = Float(prefs.opacity)
         sourceSwitch.isOn = prefs.showSource
         lockSwitch.isOn = prefs.locked
+        vadSilenceSlider.value = Float(prefs.vadSilenceMs)
+        vadThresholdSlider.value = Float(prefs.vadThreshold)
+        updateVadLabels()
+    }
+
+    /// 外部改了偏好（长按球解锁/锁定、字幕捏合缩放）后，重新拉齐面板控件。
+    func refreshFromPrefs() {
+        prefs = SettingsStore.loadUIPrefs()
+        loadFromPrefs()
     }
 
     /// 读-改-写提交，随后同步到字幕层（不动拖动保存的位置字段）。
@@ -187,6 +225,30 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
 
     @objc private func opacityChanged() {
         commit { $0.opacity = Double(opacitySlider.value) }
+    }
+
+    @objc private func vadSilenceChanged() {
+        let v = Int(vadSilenceSlider.value.rounded())
+        commit { $0.vadSilenceMs = v }
+        updateVadLabels()
+        noteVadChanged()
+    }
+
+    @objc private func vadThresholdChanged() {
+        let v = Double(vadThresholdSlider.value)
+        commit { $0.vadThreshold = v }
+        updateVadLabels()
+        noteVadChanged()
+    }
+
+    private func updateVadLabels() {
+        vadSilenceLabel.text = "\(prefs.vadSilenceMs)ms"
+        vadThresholdLabel.text = String(format: "%.2f", prefs.vadThreshold)
+    }
+
+    /// 会话配置开局生效、中途不可变：运行中改了就提醒一声。
+    private func noteVadChanged() {
+        if running { setStatus("VAD 参数已保存：停止再重新开始后生效") }
     }
 
     @objc private func sourceChanged() {

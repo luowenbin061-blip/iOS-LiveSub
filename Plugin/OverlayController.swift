@@ -90,7 +90,9 @@ final class OverlayController {
         let prefs = SettingsStore.loadUIPrefs()
         subtitle.prefs = prefs
         ball.setTitle("译", for: .normal)
-        ball.addTarget(self, action: #selector(ballTapped), for: .touchUpInside)
+        // 轻点开面板；长按解锁/锁定（长按与轻点天然不冲突，不需要双击那种等待）。
+        ball.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(ballTapped)))
+        ball.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(ballLongPressed(_:))))
 
         let panel = SettingsPanel(subtitle: subtitle)
         panel.isHidden = true
@@ -107,6 +109,13 @@ final class OverlayController {
         layoutSubtitle(prefs: prefs)
         layoutBall(prefs: prefs)
         layoutPanel()
+
+        // 首次使用给个上手提示（有位置记录的老用户不再打扰）。
+        if prefs.subtitleCenter == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.subtitle.hint("点「译」球开面板 · 长按球解锁后可拖动/缩放字幕")
+            }
+        }
     }
 
     private func ensureOnTop() {
@@ -185,11 +194,24 @@ final class OverlayController {
         guard let panel else { return }
         if panel.isHidden {
             ensureOnTop()
+            panel.refreshFromPrefs()
             panel.isHidden = false
             layoutPanel()
         } else {
             panel.isHidden = true
         }
+    }
+
+    /// 长按球：解锁/锁定字幕（解锁后才能拖动和双指缩放）。
+    @objc private func ballLongPressed(_ g: UILongPressGestureRecognizer) {
+        guard g.state == .began else { return }
+        SettingsStore.mutatePrefs { $0.locked.toggle() }
+        let prefs = SettingsStore.loadUIPrefs()
+        subtitle.prefs = prefs
+        panel?.refreshFromPrefs()
+        subtitle.hint(prefs.locked
+            ? "已锁定（点击穿透）· 长按球可解锁"
+            : "已解锁：拖动换位 / 双指缩放字号 · 长按球再锁定")
     }
 }
 
@@ -212,7 +234,7 @@ final class ControlBall: UIButton {
 
         // 版本小字：不用触摸就能确认手机上跑的是哪一版。
         let ver = UILabel()
-        ver.text = "v0.4"
+        ver.text = "v0.5"
         ver.font = .systemFont(ofSize: 8)
         ver.textColor = UIColor.white.withAlphaComponent(0.9)
         ver.textAlignment = .center

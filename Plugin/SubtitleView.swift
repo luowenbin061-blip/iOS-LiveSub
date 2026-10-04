@@ -24,6 +24,7 @@ final class SubtitleView: UIView {
     private var currentStash = ""
     private var currentSource = ""
     private var flashToken = 0
+    private var pinchBaseSize: Double = 20
 
     private(set) var isLocked = true
 
@@ -64,6 +65,7 @@ final class SubtitleView: UIView {
         ])
 
         addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(onPan(_:))))
+        addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(onPinch(_:))))
         applyStyle()
         render()
     }
@@ -99,7 +101,7 @@ final class SubtitleView: UIView {
             currentSource = ev.text + (ev.done ? "" : ev.stash)
             render()
         case "warn", "error":
-            flash(ev.text)
+            hint(ev.text)
         default:
             break
         }
@@ -119,8 +121,8 @@ final class SubtitleView: UIView {
         relayout()
     }
 
-    /// 短暂顶替历史行显示提示（错误/警告），几秒后恢复。
-    private func flash(_ message: String) {
+    /// 短暂顶替历史行显示提示（错误/警告/操作反馈），几秒后恢复。
+    func hint(_ message: String) {
         flashToken += 1
         let token = flashToken
         let saved = history
@@ -177,6 +179,25 @@ final class SubtitleView: UIView {
             clampIntoSuperview()
             let c = center
             SettingsStore.mutatePrefs { $0.subtitleCenter = [Double(c.x), Double(c.y)] }
+        }
+    }
+
+    /// 双指缩放字号（仅解锁状态可达）。
+    @objc private func onPinch(_ g: UIPinchGestureRecognizer) {
+        guard !isLocked else { return }
+        switch g.state {
+        case .began:
+            pinchBaseSize = prefs.fontSize
+        case .changed:
+            let size = min(max(pinchBaseSize * Double(g.scale), 12), 30)
+            var p = prefs
+            p.fontSize = size
+            prefs = p  // didSet：样式立即生效
+        case .ended, .cancelled:
+            let size = prefs.fontSize
+            SettingsStore.mutatePrefs { $0.fontSize = size }
+        default:
+            break
         }
     }
 }

@@ -77,4 +77,14 @@ final class SettingsTests: XCTestCase {
         let t2 = session2?["input_audio_transcription"] as? [String: Any]
         XCTAssertEqual(t2?["language"] as? String, "zh")
     }
+
+    func testVadParametersAreCarriedThrough() {
+        var custom = make()
+        custom.vadThreshold = 0.45
+        custom.vadSilenceMs = 400
+        let session = custom.sessionUpdate()["session"] as? [String: Any]
+        let vad = session?["turn_detection"] as? [String: Any]
+        XCTAssertEqual(vad?["threshold"] as? Double, 0.45)
+        XCTAssertEqual(vad?["silence_duration_ms"] as? Int, 400)
+    }
 }

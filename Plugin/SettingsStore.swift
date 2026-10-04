@@ -17,6 +17,10 @@ struct UIPrefs: Codable, Equatable {
     /// [x, y]，首启为空，落默认位置。
     var subtitleCenter: [Double]?
     var ballCenter: [Double]?
+    /// VAD 灵敏度：环境嘈杂、断句迟迟不闭合时调高。
+    var vadThreshold: Double = 0.2
+    /// VAD 静音判定（ms）。插件默认 500 比核心保守值 800 更"急"，字幕更快跟上。
+    var vadSilenceMs: Int = 500
     var targetLang: String = "zh"
     var sourceLang: String = "auto"
     var model: String = Settings.defaultModel
@@ -67,6 +71,8 @@ enum SettingsStore {
         s.model = p.model
         s.region = p.region
         s.workspaceID = p.workspaceID
+        s.vadThreshold = p.vadThreshold
+        s.vadSilenceMs = p.vadSilenceMs
         return s
     }
 

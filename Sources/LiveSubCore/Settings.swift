@@ -26,6 +26,10 @@ public struct Settings: Codable, Equatable, Sendable {
     public var model: String = Settings.defaultModel
     /// 热词：源词 -> 译文。服务端上限 1000 条。
     public var hotwords: [String: String] = [:]
+    /// VAD（语音活动检测）灵敏度阈值：环境嘈杂、误触发言时调高。
+    public var vadThreshold: Double = 0.2
+    /// VAD 静音判定（毫秒）：连续讲话没有停顿时会一直攒着不翻译；调小可更快断句。
+    public var vadSilenceMs: Int = 800
 
     public init() {}
 
@@ -67,10 +71,12 @@ public struct Settings: Codable, Equatable, Sendable {
                 "translation": translation,
                 "input_audio_transcription": transcription,
                 // 不显式配置 VAD 的话服务端永远不会结束一个 turn，文本会累积成一整段。
+                // 两个数值可调（插件设置页）：连续讲话不闭合、字幕跟不上时缩短静音判定；
+                // 环境嘈杂、误触发言时提高阈值。
                 "turn_detection": [
                     "type": "server_vad",
-                    "threshold": 0.2,
-                    "silence_duration_ms": 800,
+                    "threshold": vadThreshold,
+                    "silence_duration_ms": vadSilenceMs,
                 ],
             ],
         ]
