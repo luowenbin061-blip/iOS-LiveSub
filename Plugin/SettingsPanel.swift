@@ -47,7 +47,7 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
         statusLabel.font = .systemFont(ofSize: 12)
         statusLabel.textColor = UIColor.white.withAlphaComponent(0.75)
         statusLabel.numberOfLines = 0
-        statusLabel.text = "未启动（v0.3）"
+        statusLabel.text = "未启动（v0.4）"
 
         startButton.setTitle("开始翻译", for: .normal)
         startButton.titleLabel?.font = .boldSystemFont(ofSize: 15)

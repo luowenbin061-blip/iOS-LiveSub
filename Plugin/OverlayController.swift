@@ -1,45 +1,92 @@
 // 悬浮层总控：把字幕、悬浮球、设置面板挂进**宿主 App 自己的窗口**。
 //
-// v0.3 关键决策：不再自建全屏窗口赌「跨窗口触摸穿透」，而是直接挂进宿主窗口。
-// 理由：同一窗口内的 hitTest 是固定算法 —— 我们的容器在空白处返回 nil，
-// 触摸就自然落到宿主自己的视图上；不存在跨窗口投递的变数。
-// （找不到宿主窗口时才退回自建穿透窗口的旧路径。）
+// v0.3 关键决策：不自建全屏窗口赌「跨窗口触摸穿透」，直接挂进宿主窗口 ——
+// 同一窗口内的 hitTest 是固定算法，空白处返回 nil 触摸自然落到宿主视图上。
+// 实测确认：触摸恢复正常。
 //
-// 键盘：面板挂在宿主窗口里，点输入框时宿主窗口本就是 key，键盘正常弹出。
+// v0.4：宿主会不断往自己的窗口里加内容（启动图 → 主界面、弹窗、全屏视频…），
+// 这些新内容会盖住我们的容器，甚至宿主整个换窗口。所以加了 0.6s 的保温循环：
+//   - 宿主换窗口 → 把容器整体搬过去
+//   - 被移出层级 → 重新挂回
+//   - 被新内容盖住 → 提回顶层
+// 检查本身是纳秒级操作，性能可忽略；副作用是球和字幕会一直浮在宿主弹窗之上（这正是想要的）。
 
 import UIKit
 
 final class OverlayController {
     static let shared = OverlayController()
 
-    /// 自建窗口模式下的窗口（挂宿主窗口成功时为空）。
-    private var ownWindow: UIWindow?
-    private var ownWindowPreviousKey: UIWindow?
-    /// 宿主窗口（挂载模式）。
-    private var hostWindow: UIWindow?
-
     private let ball = ControlBall()
     private(set) var subtitle = SubtitleView()
     private(set) var panel: SettingsPanel?
     private var root: PluginRootView?
+    private var hostWindow: UIWindow?
+    private var keepAlive: Timer?
     private var installed = false
 
     func install() {
-        guard !installed else { return }
-        installed = true
+        guard keepAlive == nil else { return }
+        let t = Timer(timeInterval: 0.6, repeats: true) { [weak self] _ in
+            self?.tick()
+        }
+        RunLoop.main.add(t, forMode: .common)  // .common：滚动/拖拽中照常跑
+        keepAlive = t
+        tick()
+    }
 
-        if let host = Self.findHostWindow(), let hostRoot = attachToHost(host) {
+    /// 保温循环：首次挂载、窗口迁移、层级保活。
+    private func tick() {
+        guard let host = Self.findHostWindow() else { return }
+
+        if !installed {
+            let container = PluginRootView()
+            container.frame = host.bounds
+            container.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            host.addSubview(container)
+            root = container
             hostWindow = host
-            root = hostRoot
-        } else if let (window, ownRoot) = makeOwnWindow() {
-            ownWindow = window
-            root = ownRoot
-        } else {
+            installed = true
+            assemble(on: container)
             return
         }
 
         guard let root else { return }
 
+        if hostWindow !== host {
+            // 宿主换了窗口（启动图窗口 → 主窗口之类）：整块搬过去。
+            root.removeFromSuperview()
+            hostWindow = host
+            root.frame = host.bounds
+            host.addSubview(root)
+            handleGeometryChange()
+            return
+        }
+
+        if root.superview !== host {
+            // 被宿主移出了层级：重新挂回。
+            root.removeFromSuperview()
+            root.frame = host.bounds
+            host.addSubview(root)
+            handleGeometryChange()
+        } else if host.subviews.last !== root {
+            // 被宿主新加的内容盖住：提回顶层。
+            host.bringSubviewToFront(root)
+        }
+    }
+
+    /// 宿主窗口：优先 key + normal 层（避开 alert/键盘等系统窗口），再退而求其次。
+    private static func findHostWindow() -> UIWindow? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        let all = scene?.windows ?? UIApplication.shared.windows
+        return all.first { $0.isKeyWindow && $0.windowLevel == .normal }
+            ?? all.first { $0.windowLevel == .normal }
+            ?? all.first { $0.isKeyWindow }
+            ?? all.first
+    }
+
+    /// 组装控件（只在首次挂载时执行一次）。
+    private func assemble(on container: PluginRootView) {
         let prefs = SettingsStore.loadUIPrefs()
         subtitle.prefs = prefs
         ball.setTitle("译", for: .normal)
@@ -48,64 +95,20 @@ final class OverlayController {
         let panel = SettingsPanel(subtitle: subtitle)
         panel.isHidden = true
 
-        root.subtitle = subtitle
-        root.ball = ball
-        root.panel = panel
-        root.addSubview(subtitle)
-        root.addSubview(ball)
-        root.addSubview(panel)
-        root.onBoundsChange = { [weak self] in self?.handleGeometryChange() }
+        container.subtitle = subtitle
+        container.ball = ball
+        container.panel = panel
+        container.addSubview(subtitle)
+        container.addSubview(ball)
+        container.addSubview(panel)
+        container.onBoundsChange = { [weak self] in self?.handleGeometryChange() }
 
         self.panel = panel
-
         layoutSubtitle(prefs: prefs)
         layoutBall(prefs: prefs)
         layoutPanel()
     }
 
-    // MARK: - 挂载
-
-    /// 找宿主 App 自己的窗口：优先 key，其次 .normal 层，最后任意非本插件窗口。
-    private static func findHostWindow() -> UIWindow? {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
-        let all = scene?.windows ?? UIApplication.shared.windows
-        let candidates = all.filter { !($0 is PassthroughWindow) }
-        return candidates.first { $0.isKeyWindow }
-            ?? candidates.first { $0.windowLevel == .normal }
-            ?? candidates.first
-    }
-
-    /// 把穿透容器作为宿主窗口的顶层子视图挂进去。
-    private func attachToHost(_ host: UIWindow) -> PluginRootView? {
-        let root = PluginRootView()
-        root.frame = host.bounds
-        root.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        host.addSubview(root)
-        return root
-    }
-
-    /// 兜底：没找到宿主窗口时，自建一个穿透窗口（保留旧路径）。
-    private func makeOwnWindow() -> (UIWindow, PluginRootView)? {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
-        let w: UIWindow
-        if let scene {
-            w = PassthroughWindow(windowScene: scene)
-        } else {
-            w = PassthroughWindow(frame: UIScreen.main.bounds)
-        }
-        w.windowLevel = .alert + 1
-        w.backgroundColor = .clear
-        let root = PluginRootView()
-        let vc = UIViewController()
-        vc.view = root
-        w.rootViewController = vc
-        w.isHidden = false
-        return (w, root)
-    }
-
-    /// 挂宿主窗口时，宿主后续弹的全屏内容可能压住我们 —— 字幕流动时顺手把容器提回顶层。
     private func ensureOnTop() {
         guard let root, let host = hostWindow, root.superview === host else { return }
         if host.subviews.last !== root {
@@ -184,17 +187,8 @@ final class OverlayController {
             ensureOnTop()
             panel.isHidden = false
             layoutPanel()
-            if let own = ownWindow {
-                // 只有自建窗口模式需要抢 key 才能弹键盘；挂宿主窗口时宿主本就是 key。
-                ownWindowPreviousKey = own.windowScene?.windows.first {
-                    $0.isKeyWindow && $0 !== own
-                }
-                own.makeKeyAndVisible()
-            }
         } else {
             panel.isHidden = true
-            ownWindowPreviousKey?.makeKey()
-            ownWindowPreviousKey = nil
         }
     }
 }
@@ -218,7 +212,7 @@ final class ControlBall: UIButton {
 
         // 版本小字：不用触摸就能确认手机上跑的是哪一版。
         let ver = UILabel()
-        ver.text = "v0.3"
+        ver.text = "v0.4"
         ver.font = .systemFont(ofSize: 8)
         ver.textColor = UIColor.white.withAlphaComponent(0.9)
         ver.textAlignment = .center
@@ -281,17 +275,5 @@ final class PluginRootView: UIView {
             return subtitle.hitTest(convert(point, to: subtitle), with: event)
         }
         return nil  // 其余区域点击穿透
-    }
-}
-
-// MARK: - 穿透窗口（仅自建窗口兜底路径使用）
-
-/// 兜底路径的窗口：hitTest 在没命中真实控件时返回 nil，让触摸继续投递。
-final class PassthroughWindow: UIWindow {
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let hit = super.hitTest(point, with: event)
-        if hit === self { return nil }
-        if let root = rootViewController?.view, hit === root { return nil }
-        return hit
     }
 }
