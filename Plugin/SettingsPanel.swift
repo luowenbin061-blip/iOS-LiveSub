@@ -16,6 +16,7 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
     private let targetField = UITextField()
     private let modelSeg = UISegmentedControl(items: ["60 语种", "18 语种"])
     private let regionSeg = UISegmentedControl(items: ["北京", "新加坡"])
+    private let sourceSeg = UISegmentedControl(items: ["麦克风", "系统声音"])
     private let sizeSlider = UISlider()
     private let opacitySlider = UISlider()
     private let vadSilenceSlider = UISlider()
@@ -51,7 +52,7 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
         statusLabel.font = .systemFont(ofSize: 12)
         statusLabel.textColor = UIColor.white.withAlphaComponent(0.75)
         statusLabel.numberOfLines = 0
-        statusLabel.text = "未启动（v0.6）"
+        statusLabel.text = "未启动（v0.7）"
 
         startButton.setTitle("开始翻译", for: .normal)
         startButton.titleLabel?.font = .boldSystemFont(ofSize: 15)
@@ -82,6 +83,7 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
 
         modelSeg.addTarget(self, action: #selector(modelChanged), for: .valueChanged)
         regionSeg.addTarget(self, action: #selector(regionChanged), for: .valueChanged)
+        sourceSeg.addTarget(self, action: #selector(audioSourceChanged), for: .valueChanged)
 
         sizeSlider.minimumValue = 12
         sizeSlider.maximumValue = 30
@@ -108,6 +110,7 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
             labeled("目标语言", targetField),
             labeled("模型", modelSeg),
             labeled("地域", regionSeg),
+            labeled("音频来源", sourceSeg),
             labeled("字幕字号", sizeSlider),
             labeled("背景透明度", opacitySlider),
             labeled2("停顿判定", vadSilenceLabel, vadSilenceSlider),
@@ -172,6 +175,7 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
         targetField.text = prefs.targetLang
         modelSeg.selectedSegmentIndex = prefs.model == Settings.legacyModel ? 1 : 0
         regionSeg.selectedSegmentIndex = prefs.region == .singapore ? 1 : 0
+        sourceSeg.selectedSegmentIndex = prefs.audioSource == "system" ? 1 : 0
         sizeSlider.value = Float(prefs.fontSize)
         opacitySlider.value = Float(prefs.opacity)
         sourceSwitch.isOn = prefs.showSource
@@ -217,6 +221,12 @@ final class SettingsPanel: UIView, UITextFieldDelegate {
     @objc private func regionChanged() {
         let raw = (regionSeg.selectedSegmentIndex == 1 ? Region.singapore : Region.beijing).rawValue
         commit { $0.regionRAW = raw }
+    }
+
+    @objc private func audioSourceChanged() {
+        let v = sourceSeg.selectedSegmentIndex == 1 ? "system" : "mic"
+        commit { $0.audioSource = v }
+        if running { setStatus("音频来源已保存：停止再重新开始后生效") }
     }
 
     @objc private func sizeChanged() {

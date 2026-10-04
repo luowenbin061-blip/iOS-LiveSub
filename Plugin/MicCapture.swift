@@ -9,7 +9,7 @@
 
 import AVFoundation
 
-final class MicCapture {
+final class MicCapture: AudioCapturing {
     private let engine = AVAudioEngine()
     private var resampler: Resampler?
     private var carry: [Int16] = []

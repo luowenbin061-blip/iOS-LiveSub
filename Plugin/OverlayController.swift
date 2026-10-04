@@ -5,9 +5,11 @@
 // 实测确认：触摸恢复正常。
 //
 // v0.4：宿主会不断往自己的窗口里加内容（启动图 → 主界面、弹窗、全屏视频…），
-// 这些新内容会盖住我们的容器，甚至宿主整个换窗口。所以加了 0.6s 的保温循环。
-//
-// v0.6：球色即状态（绿=翻译中 / 橙=重连或采集恢复中 / 蓝=空闲）。
+// 这些新内容会盖住我们的容器，甚至宿主整个换窗口。所以加了 0.6s 的保温循环：
+//   - 宿主换窗口 → 把容器整体搬过去
+//   - 被移出层级 → 重新挂回
+//   - 被新内容盖住 → 提回顶层
+// 检查本身是纳秒级操作，性能可忽略；副作用是球和字幕会一直浮在宿主弹窗之上（这正是想要的）。
 
 import UIKit
 
@@ -245,7 +247,7 @@ final class ControlBall: UIButton {
 
         // 版本小字：不用触摸就能确认手机上跑的是哪一版。
         let ver = UILabel()
-        ver.text = "v0.6"
+        ver.text = "v0.7"
         ver.font = .systemFont(ofSize: 8)
         ver.textColor = UIColor.white.withAlphaComponent(0.9)
         ver.textAlignment = .center

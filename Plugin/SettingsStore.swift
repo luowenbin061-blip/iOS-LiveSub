@@ -21,6 +21,8 @@ struct UIPrefs: Codable, Equatable {
     var vadThreshold: Double = 0.2
     /// VAD 静音判定（ms）。插件默认 500 比核心保守值 800 更"急"，字幕更快跟上。
     var vadSilenceMs: Int = 500
+    /// 音频来源："mic"（麦克风）或 "system"（系统声音，ReplayKit 录宿主自身音频）。
+    var audioSource: String = "mic"
     var targetLang: String = "zh"
     var sourceLang: String = "auto"
     var model: String = Settings.defaultModel

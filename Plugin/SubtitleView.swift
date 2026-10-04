@@ -1,7 +1,9 @@
-// 悬浮字幕：最近一句（灰小）+ 当前句（大，暂定尾巴置灰）+ 可选原文行。
+// 悬浮字幕（v0.7：整句模式）——按用户要求：不流式、不历史。
+// 一句话完整翻译出来之后直接整句上屏，直到下一句完整翻译到来再整体替换。
+// （用延迟换完整度，这是明确取舍；也顺带消掉了流式更新带来的跳动感。）
 //
-// 渲染语义继承协议层结论：text 是累积确认文本、stash 是暂定尾巴 —— 每次都整体替换，
-// 不做追加。turn 切换（id 变化）时才把上一句推进历史行。
+// 语义来源仍是协议层结论：text 累积确认 + stash 暂定 —— 但这里两者都只暂存，
+// 等 done 事件（整句定稿）才真正上屏。
 
 import UIKit
 
@@ -13,17 +15,18 @@ final class SubtitleView: UIView {
         }
     }
 
-    private let historyLabel = UILabel()
     private let mainLabel = UILabel()
     private let sourceLabel = UILabel()
     private let stack = UIStackView()
 
-    private var history: [String] = []
     private var currentId = ""
-    private var currentText = ""
-    private var currentStash = ""
-    private var currentSource = ""
+    /// 当前句已知的最新文本（text + stash，尚未定稿）。
+    private var pendingText = ""
+    /// 正在上屏的整句译文。
+    private var mainText = ""
+    private var sourceText = ""
     private var flashToken = 0
+    private var savedMain = ""
     private var pinchBaseSize: Double = 20
 
     private(set) var isLocked = true
@@ -40,7 +43,7 @@ final class SubtitleView: UIView {
         layer.masksToBounds = true
 
         // 压在视频上也要读得清：深色半透明底 + 文字阴影。
-        for label in [historyLabel, mainLabel, sourceLabel] {
+        for label in [mainLabel, sourceLabel] {
             label.numberOfLines = 0
             label.textAlignment = .center
             label.layer.shadowColor = UIColor.black.cgColor
@@ -52,7 +55,6 @@ final class SubtitleView: UIView {
         stack.axis = .vertical
         stack.alignment = .fill
         stack.spacing = 4
-        stack.addArrangedSubview(historyLabel)
         stack.addArrangedSubview(mainLabel)
         stack.addArrangedSubview(sourceLabel)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -77,29 +79,32 @@ final class SubtitleView: UIView {
         backgroundColor = UIColor.black.withAlphaComponent(prefs.opacity)
         mainLabel.font = .boldSystemFont(ofSize: prefs.fontSize)
         mainLabel.textColor = .white
-        historyLabel.font = .systemFont(ofSize: max(prefs.fontSize - 6, 10))
-        historyLabel.textColor = UIColor.white.withAlphaComponent(0.55)
         sourceLabel.font = .systemFont(ofSize: max(prefs.fontSize - 5, 11))
         sourceLabel.textColor = UIColor.white.withAlphaComponent(0.75)
     }
 
-    // MARK: - 事件
+    // MARK: - 事件（整句模式）
 
     func apply(_ ev: TranslateEvent) {
         switch ev.kind {
         case "target":
             if ev.id != currentId {
-                if !currentText.isEmpty { pushHistory(currentText) }
+                // 上一句没等到 done 也先补上，避免整句丢失
+                if !pendingText.isEmpty { show(pendingText) }
                 currentId = ev.id
-                currentText = ""
-                currentStash = ""
+                pendingText = ""
             }
-            currentText = ev.text
-            currentStash = ev.done ? "" : ev.stash
-            render()
+            if ev.done {
+                show(ev.text.isEmpty ? pendingText : ev.text)
+                pendingText = ""
+            } else {
+                pendingText = ev.text + ev.stash
+            }
         case "source":
-            currentSource = ev.text + (ev.done ? "" : ev.stash)
-            render()
+            if ev.done {
+                sourceText = ev.text
+                render()
+            }
         case "warn", "error":
             hint(ev.text)
         default:
@@ -107,44 +112,33 @@ final class SubtitleView: UIView {
         }
     }
 
-    private func pushHistory(_ line: String) {
-        history.append(line)
-        if history.count > 1 { history.removeFirst(history.count - 1) }
+    /// 整句上屏。
+    private func show(_ text: String) {
+        guard !text.isEmpty else { return }
+        flashToken += 1  // 取消未完成的临时提示恢复
+        mainText = text
+        render()
     }
 
-    private func render() {
-        mainLabel.attributedText = Self.attributed(text: currentText, stash: currentStash)
-        historyLabel.text = history.last
-        historyLabel.isHidden = history.isEmpty
-        sourceLabel.text = currentSource
-        sourceLabel.isHidden = !prefs.showSource || currentSource.isEmpty
-        relayout()
-    }
-
-    /// 短暂顶替历史行显示提示（错误/警告/操作反馈），几秒后恢复。
+    /// 临时提示（错误/警告/操作反馈）：占用主行，几秒后恢复。
     func hint(_ message: String) {
         flashToken += 1
         let token = flashToken
-        let saved = history
-        history = ["⚠️ " + message]
+        savedMain = mainText
+        mainText = "⚠️ " + message
         render()
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
             guard let self, self.flashToken == token else { return }
-            self.history = saved
+            self.mainText = self.savedMain
             self.render()
         }
     }
 
-    private static func attributed(text: String, stash: String) -> NSAttributedString {
-        let a = NSMutableAttributedString(string: text, attributes: [
-            .foregroundColor: UIColor.white,
-        ])
-        if !stash.isEmpty {
-            a.append(NSAttributedString(string: text.isEmpty ? stash : " " + stash, attributes: [
-                .foregroundColor: UIColor.white.withAlphaComponent(0.45),
-            ]))
-        }
-        return a
+    private func render() {
+        mainLabel.text = mainText
+        sourceLabel.text = sourceText
+        sourceLabel.isHidden = !prefs.showSource || sourceText.isEmpty
+        relayout()
     }
 
     // MARK: - 尺寸与位置
