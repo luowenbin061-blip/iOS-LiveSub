@@ -1,0 +1,70 @@
+# dylib 云编译：macOS runner 交叉编译 iOS arm64 的 LiveSub.dylib（TrollFools 注入用）。
+#
+# 注：本仓库的触发依赖统一的 push 事件；经 Git Data API 直接改 ref 不会产生 workflow 事件，
+# 推送请走 Contents API / 网页 / 本地 git。
+#
+# 组成：Swift 核心（Sources/LiveSubCore）+ Swift 插件层（Plugin/*.swift）+ ObjC 入口（Plugin/Entry.m）。
+# 先对 iOS 目标做整体类型检查（快、报错清楚），再编译链接；
+# 产物上传 artifact，并提交回仓库 dist/ 方便真机直接下载。
+
+name: dylib
+
+on:
+  push:
+    paths:
+      - 'Sources/LiveSubCore/**'
+      - 'Plugin/**'
+      - '.github/workflows/dylib.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: iOS 目标类型检查（核心 + 插件一起编）
+        run: |
+          set -euxo pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun --sdk iphoneos swiftc -swift-version 5 \
+            -target arm64-apple-ios15.0 -sdk "$SDK" \
+            -module-name LiveSub \
+            -typecheck \
+            Sources/LiveSubCore/*.swift Plugin/*.swift
+
+      - name: 编译 dylib
+        run: |
+          set -euxo pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          mkdir -p dist
+          xcrun --sdk iphoneos clang -target arm64-apple-ios15.0 -isysroot "$SDK" \
+            -fobjc-arc -c Plugin/Entry.m -o dist/Entry.o
+          xcrun --sdk iphoneos swiftc -swift-version 5 \
+            -target arm64-apple-ios15.0 -sdk "$SDK" \
+            -O -module-name LiveSub \
+            -emit-library -o dist/LiveSub.dylib \
+            -Xlinker -install_name -Xlinker "@rpath/LiveSub.dylib" \
+            Sources/LiveSubCore/*.swift Plugin/*.swift dist/Entry.o
+          file dist/LiveSub.dylib
+          ls -lh dist/LiveSub.dylib
+
+      - name: 上传 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: livesub-dylib
+          path: dist/LiveSub.dylib
+          if-no-files-found: error
+
+      - name: 产物提交回仓库（真机可直接下载）
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@github.com"
+          git add dist/LiveSub.dylib
+          git commit -m "build: LiveSub.dylib (CI 产物)" --allow-empty || true
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git main || true
