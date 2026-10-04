@@ -1,5 +1,5 @@
 // 悬浮层总控：一个高 windowLevel 的透明全屏窗口，承载字幕、悬浮球与设置面板。
-// 空白区域点击穿透给宿主 App（hitTest 逻辑见文件底部的 PluginRootView）。
+// 空白区域点击穿透给宿主 App（窗口级 + 根视图级双层穿透）。
 //
 // 键盘焦点策略：平时不抢 key 窗口（宿主照常输入）；只有设置面板打开、
 // 需要弹键盘时才 makeKeyAndVisible，关闭时把 key 还给原窗口。
@@ -26,9 +26,9 @@ final class OverlayController {
         let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
         let w: UIWindow
         if let scene {
-            w = UIWindow(windowScene: scene)
+            w = PassthroughWindow(windowScene: scene)
         } else {
-            w = UIWindow(frame: UIScreen.main.bounds)
+            w = PassthroughWindow(frame: UIScreen.main.bounds)
         }
         w.windowLevel = .alert + 1
         w.backgroundColor = .clear
@@ -211,5 +211,21 @@ final class PluginRootView: UIView {
             return subtitle.hitTest(convert(point, to: subtitle), with: event)
         }
         return nil  // 其余区域点击穿透
+    }
+}
+
+// MARK: - 穿透窗口
+
+/// 关键修复（v0.2）：**窗口自身**的 hitTest 必须在没命中任何真实控件时返回 nil。
+///
+/// UIWindow 的默认实现是「点在窗口内、子视图没接住 → 返回窗口自己」，
+/// 于是空白的全屏悬浮窗会把所有触摸吞掉 —— 宿主的 App 表现为「整个点不动」。
+/// 这里返回 nil 后，系统会继续往下层窗口投递，触摸就穿透回宿主了。
+final class PassthroughWindow: UIWindow {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        if hit === self { return nil }
+        if let root = rootViewController?.view, hit === root { return nil }
+        return hit
     }
 }
