@@ -1,0 +1,27 @@
+# 云开发流水线：Windows 无 Swift 工具链，协议层在 macOS runner 上编译 + 单测。
+# dylib 构建阶段后再加交叉编译 job（参照 iOS-SkipAd 的 build.yml）。
+
+name: ci
+
+on:
+  push:
+    paths-ignore:
+      - 'dist/**'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift 版本
+        run: swift --version
+
+      - name: 构建（含喂文件探针）
+        run: swift build -c release
+
+      - name: 单测
+        run: swift test
